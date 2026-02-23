@@ -1,0 +1,27 @@
+# Created by venv; see https://docs.python.org/3/library/venv.html
+
+# ======================
+# Node.js
+# ======================
+node_modules/
+npm-debug.log*
+
+# ======================
+# Python
+# ======================
+__pycache__/
+*.pyc
+venv/
+.env
+
+# ======================
+# Logs
+# ======================
+logs/
+*.log
+
+# ======================
+# OS
+# ======================
+.DS_Store
+Thumbs.db

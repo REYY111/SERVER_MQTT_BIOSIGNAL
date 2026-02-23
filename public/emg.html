@@ -1,0 +1,93 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>EMG Realtime Monitor</title>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+
+    <style>
+      body {
+        font-family: Arial;
+        background: #111;
+        color: white;
+        text-align: center;
+      }
+      canvas {
+        background: #1a1a1a;
+      }
+    </style>
+  </head>
+
+  <body>
+    <h2>⚡ EMG Realtime (MQTT)</h2>
+
+    <canvas id="chart" width="1000" height="450"></canvas>
+
+    <script>
+      const socket = io();
+
+      let x = 0;
+      const WINDOW = 300;
+
+      const chart = new Chart(document.getElementById("chart"), {
+        type: "line",
+        data: {
+          labels: [],
+          datasets: [
+            {
+              label: "RAW ADC",
+              data: [],
+              borderWidth: 1,
+              tension: 0.1,
+            },
+            {
+              label: "CLEAN EMG",
+              data: [],
+              borderWidth: 2,
+              tension: 0.2,
+            },
+            {
+              label: "ENVELOPE",
+              data: [],
+              borderWidth: 3,
+              tension: 0.3,
+            },
+          ],
+        },
+
+        options: {
+          animation: false,
+          responsive: true,
+          scales: {
+            x: {
+              min: 0,
+              max: WINDOW,
+            },
+            y: {
+              beginAtZero: false,
+            },
+          },
+        },
+      });
+
+      // ================= SOCKET EMG =================
+      socket.on("emg", (data) => {
+        x++;
+
+        chart.data.labels.push(x);
+
+        chart.data.datasets[0].data.push(data.raw);
+        chart.data.datasets[1].data.push(data.clean);
+        chart.data.datasets[2].data.push(data.envelope);
+
+        // sliding window
+        chart.options.scales.x.min = Math.max(0, x - WINDOW);
+        chart.options.scales.x.max = x;
+
+        chart.update("none");
+      });
+    </script>
+  </body>
+</html>
