@@ -1,78 +1,96 @@
-import json
-import csv
-import time
 import paho.mqtt.client as mqtt
+import numpy as np
+import json
 
-# ================= MQTT =================
-BROKER = "10.170.222.19"      # IP broker MQTT
-PORT = 1883
-TOPIC = "sensor/emg"
+# ================= CONFIG =================
 
-# ================= FILE =================
-filename = f"emg_record_{int(time.time())}.csv"
+MQTT_BROKER = "10.82.218.19"
 
-csv_file = open(filename, mode="w", newline="")
-writer = csv.writer(csv_file)
+TOPIC_SUB = "sensor/emg"
+TOPIC_PUB = "sensor/emg_processed"
 
-# header CSV
-writer.writerow([
-    "pc_time_ms",
-    "emg_timestamp",
-    "raw_adc",
-    "clean_emg",
-    "envelope"
-])
+FS = 500
+WINDOW = 200
 
-csv_file.flush()
 
-print("📁 Recording to:", filename)
+# ================= BUFFER =================
 
-# ================= CALLBACK =================
-start_time = time.time()
+buffer_clean = []
 
-def on_connect(client, userdata, flags, rc):
-    print("✅ MQTT Connected")
-    client.subscribe(TOPIC)
+
+# ================= RMS =================
+
+def compute_rms(signal):
+
+    if len(signal) == 0:
+        return 0
+
+    signal = np.array(signal)
+
+    rms = np.sqrt(np.mean(signal**2))
+
+    return rms
+
+
+# ================= MQTT CALLBACK =================
 
 def on_message(client, userdata, msg):
-    global csv_file
+
+    global buffer_clean
 
     try:
+
         data = json.loads(msg.payload.decode())
 
-        pc_time = int((time.time() - start_time) * 1000)
+        raw   = data["raw"]
+        clean = data["clean"]
 
-        row = [
-            pc_time,
-            data["ts"],
-            data["raw"],
-            data["clean"],
-            data["envelope"]
-        ]
+        buffer_clean.append(clean)
 
-        writer.writerow(row)
+        if len(buffer_clean) > WINDOW:
+            buffer_clean.pop(0)
 
-        # IMPORTANT → langsung tulis disk
-        csv_file.flush()
+        # ===== RMS =====
 
-        print(row)
+        rms = compute_rms(buffer_clean)
+
+        # ===== OUTPUT =====
+
+        output = {
+
+            "raw_emg": raw,
+            "clean_emg": round(clean,2),
+            "rms_emg": round(rms,3),
+
+            "ts": data.get("ts",0)
+
+        }
+
+        client.publish(TOPIC_PUB, json.dumps(output))
+
+        print(
+            "RAW:", raw,
+            "| CLEAN:", round(clean,2),
+            "| RMS:", round(rms,3)
+        )
 
     except Exception as e:
-        print("❌ Error:", e)
 
-# ================= MQTT CLIENT =================
+        print("ERROR:", e)
+
+
+# ================= MQTT SETUP =================
+
 client = mqtt.Client()
 
-client.on_connect = on_connect
 client.on_message = on_message
 
-client.connect(BROKER, PORT, 60)
+client.connect(MQTT_BROKER, 1883)
 
-print("🎧 Waiting EMG data... (CTRL+C to stop)")
+client.subscribe(TOPIC_SUB)
 
-try:
-    client.loop_forever()
+print("EMG PROCESSOR RUNNING")
+print("SUB:", TOPIC_SUB)
+print("PUB:", TOPIC_PUB)
 
-except KeyboardInterrupt:
-    print("\n🛑 Recording stopped")
-    csv_file.close()
+client.loop_forever()

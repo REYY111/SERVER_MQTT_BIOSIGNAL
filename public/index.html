@@ -1,59 +1,275 @@
 <!doctype html>
-<html>
+<html lang="id">
   <head>
     <meta charset="UTF-8" />
-    <title>PPG Realtime</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Biosignal Realtime Dashboard</title>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="/socket.io/socket.io.js"></script>
+
+    <style>
+      body {
+        font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        background: #050505;
+        color: #e0e0e0;
+        margin: 0;
+        padding: 20px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+
+      .container {
+        width: 100%;
+        max-width: 1200px;
+      }
+
+      header {
+        margin-bottom: 20px;
+        border-bottom: 1px solid #333;
+        width: 100%;
+        padding-bottom: 10px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 1.5rem;
+        color: #fff;
+        text-transform: uppercase;
+        letter-spacing: 2px;
+      }
+
+      .status-dot {
+        height: 10px;
+        width: 10px;
+        background-color: #00e676;
+        border-radius: 50%;
+        display: inline-block;
+        margin-right: 5px;
+        box-shadow: 0 0 10px #00e676;
+      }
+
+      .card {
+        background: #111;
+        border: 1px solid #222;
+        border-radius: 12px;
+        padding: 20px;
+        margin-bottom: 20px;
+        position: relative;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+      }
+
+      .card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 10px;
+      }
+
+      .title {
+        font-size: 0.9rem;
+        font-weight: bold;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+      }
+
+      .emg-title {
+        color: #00e676;
+      }
+      .ppg-title {
+        color: #2979ff;
+      }
+
+      .stats-container {
+        text-align: right;
+      }
+
+      .main-val {
+        font-size: 2rem;
+        font-weight: bold;
+        margin: 0;
+        font-family: "Courier New", Courier, monospace;
+      }
+
+      .sub-val {
+        font-size: 0.9rem;
+        color: #888;
+        margin: 0;
+      }
+
+      canvas {
+        width: 100% !important;
+        height: 250px !important;
+      }
+
+      .grid-layout {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 20px;
+      }
+
+      @media (min-width: 900px) {
+        /* Opsional: Jika ingin tampilan bersebelahan di layar lebar */
+      }
+    </style>
   </head>
+
   <body>
-    <canvas id="chart" width="900" height="400"></canvas>
+    <div class="container">
+      <header>
+        <h1><span class="status-dot"></span> Biosignal Monitor</h1>
+        <div id="connection-status" style="font-size: 0.8rem; color: #888">
+          Live Stream Active
+        </div>
+      </header>
+
+      <div class="grid-layout">
+        <div class="card">
+          <div class="card-header">
+            <div class="title emg-title">Electromyography (EMG)</div>
+            <div class="stats-container">
+              <p id="emgRMS" class="main-val emg-color" style="color: #00e676">
+                0.000
+              </p>
+              <p class="sub-val">RMS Value</p>
+            </div>
+          </div>
+          <canvas id="chartEMG"></canvas>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="title ppg-title">Photoplethysmogram (PPG)</div>
+            <div class="stats-container">
+              <p id="ppgBPM" class="main-val ppg-color" style="color: #2979ff">
+                0
+              </p>
+              <p id="ppgSpO2" class="sub-val">SpO2: 0% | BPM</p>
+            </div>
+          </div>
+          <canvas id="chartPPG"></canvas>
+        </div>
+      </div>
+    </div>
 
     <script>
-      const socket = io();
-      let x = 0;
-      const WINDOW = 100;
+      // Koneksi ke Socket.io (Server Node.js)
+      const socket = io({ transports: ["websocket"] });
 
-      const chart = new Chart(document.getElementById("chart"), {
+      let x = 0;
+      const WINDOW_SIZE = 200; // Jumlah titik data yang terlihat di layar
+
+      // Konfigurasi Chart Dasar
+      const getChartConfig = (color) => ({
         type: "line",
         data: {
           labels: [],
           datasets: [
             {
-              label: "IR RAW",
               data: [],
-              borderWidth: 1,
-              tension: 0.2,
-            },
-            {
-              label: "IR FILTERED",
-              data: [],
+              borderColor: color,
               borderWidth: 2,
-              tension: 0.4,
+              pointRadius: 0,
+              fill: false,
+              tension: 0.1, // Smooth sedikit tapi tidak lag
             },
           ],
         },
         options: {
           animation: false,
+          responsive: true,
+          maintainAspectRatio: false,
           scales: {
-            x: { min: 0, max: WINDOW },
-            y: { beginAtZero: false },
+            x: {
+              type: "linear",
+              min: 0,
+              max: WINDOW_SIZE,
+              grid: { color: "#222" },
+              ticks: { display: false },
+            },
+            y: {
+              grid: { color: "#222" },
+              ticks: { color: "#666", font: { size: 10 } },
+            },
+          },
+          plugins: {
+            legend: { display: false },
           },
         },
       });
 
-      socket.on("ppg", (data) => {
+      // Inisialisasi Chart
+      const chartEMG = new Chart(
+        document.getElementById("chartEMG"),
+        getChartConfig("#00e676"),
+      );
+      const chartPPG = new Chart(
+        document.getElementById("chartPPG"),
+        getChartConfig("#2979ff"),
+      );
+
+      // Mendengarkan data dari Node.js
+      socket.on("biosignal_data", (payload) => {
+        const { topic, data } = payload;
         x++;
 
+        if (topic === "sensor/emg_processed") {
+          // Update Angka RMS
+          document.getElementById("emgRMS").innerText = data.rms_emg.toFixed(3);
+
+          // Update Grafik EMG Clean
+          updateScrollingChart(chartEMG, data.clean_emg);
+        } else if (topic === "sensor/ppg_processed") {
+          // Update Angka BPM & SpO2
+          document.getElementById("ppgBPM").innerText = Math.round(data.bpm);
+          document.getElementById("ppgSpO2").innerText =
+            `SpO2: ${data.spo2}% | BPM`;
+
+          // Update Grafik PPG Filtered
+          updateScrollingChart(chartPPG, data.ir_filtered);
+        }
+      });
+
+      // Fungsi untuk menggeser grafik (Scrolling Effect)
+      function updateScrollingChart(chart, newValue) {
         chart.data.labels.push(x);
-        chart.data.datasets[0].data.push(data.ir_raw);
-        chart.data.datasets[1].data.push(data.ir_filtered);
+        chart.data.datasets[0].data.push(newValue);
 
-        chart.options.scales.x.min = Math.max(0, x - WINDOW);
-        chart.options.scales.x.max = x;
+        // Jika data sudah melebihi batas window, geser axis X
+        if (x > WINDOW_SIZE) {
+          chart.options.scales.x.min = x - WINDOW_SIZE;
+          chart.options.scales.x.max = x;
+        }
 
+        // Hapus data lama dari memori agar browser tidak berat (Memory Management)
+        if (chart.data.labels.length > WINDOW_SIZE + 50) {
+          chart.data.labels.shift();
+          chart.data.datasets[0].data.shift();
+        }
+
+        // Render chart secara instan tanpa animasi
         chart.update("none");
+      }
+
+      // Handle Koneksi Terputus
+      socket.on("disconnect", () => {
+        document.getElementById("connection-status").innerText =
+          "Connection Lost...";
+        document.querySelector(".status-dot").style.backgroundColor = "#ff1744";
+        document.querySelector(".status-dot").style.boxShadow =
+          "0 0 10px #ff1744";
+      });
+
+      socket.on("connect", () => {
+        document.getElementById("connection-status").innerText =
+          "Live Stream Active";
+        document.querySelector(".status-dot").style.backgroundColor = "#00e676";
+        document.querySelector(".status-dot").style.boxShadow =
+          "0 0 10px #00e676";
       });
     </script>
   </body>

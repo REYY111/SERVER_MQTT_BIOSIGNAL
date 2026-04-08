@@ -14,7 +14,7 @@ client = mqtt.Client()
 client.connect(BROKER, PORT, 60)
 
 # ========= BACA CSV =========
-data = pd.read_csv("datair.csv")
+data = pd.read_csv("datappg.csv")
 
 if 'IR Value' in data.columns:
     ir = data['IR Value']
